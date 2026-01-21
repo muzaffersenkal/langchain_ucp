@@ -3,6 +3,7 @@
 import uuid
 import logging
 import json
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -13,11 +14,25 @@ from ucp_sdk.models.schemas.shopping.checkout_resp import CheckoutResponse
 from ucp_sdk.models.schemas.shopping.checkout_create_req import CheckoutCreateRequest
 from ucp_sdk.models.schemas.shopping.checkout_update_req import CheckoutUpdateRequest
 from ucp_sdk.models.discovery.profile_schema import UcpDiscoveryProfile
+from ucp_sdk.models.schemas.capability import Response as UcpCapability
+from ucp_sdk.models.schemas.ucp import ResponseCheckout as UcpMetadata
 
 logger = logging.getLogger(__name__)
 
 # UCP Protocol Version
 UCP_VERSION = "2026-01-11"
+
+
+class UCPVersionError(Exception):
+    """Raised when UCP version is incompatible."""
+
+    def __init__(self, client_version: str, merchant_version: str):
+        self.client_version = client_version
+        self.merchant_version = merchant_version
+        super().__init__(
+            f"UCP version {client_version} is not supported. "
+            f"Merchant implements version {merchant_version}."
+        )
 
 
 class UCPClientConfig(BaseModel):
@@ -33,12 +48,14 @@ class UCPClient:
     """Async HTTP client for UCP-compliant merchants.
 
     This client handles all HTTP communication with UCP merchants,
-    including proper header management and request/response handling.
+    including proper header management, request/response handling,
+    profile caching, and capability negotiation.
 
     Attributes:
         config: Client configuration
         http_client: Underlying httpx async client
         verbose: Enable verbose logging
+        agent_capabilities: Capabilities this agent supports
     """
 
     def __init__(
@@ -47,6 +64,7 @@ class UCPClient:
         agent_name: str = "langchain-ucp-agent",
         timeout: float = 30.0,
         verbose: bool = False,
+        agent_capabilities: list[dict[str, Any]] | None = None,
     ):
         """Initialize UCP client.
 
@@ -55,6 +73,7 @@ class UCPClient:
             agent_name: Name of this agent for UCP-Agent header
             timeout: Request timeout in seconds
             verbose: Enable verbose logging of requests/responses
+            agent_capabilities: List of capabilities this agent supports
         """
         self.config = UCPClientConfig(
             merchant_url=merchant_url.rstrip("/"),
@@ -63,6 +82,10 @@ class UCPClient:
             verbose=verbose,
         )
         self._http_client: httpx.AsyncClient | None = None
+
+        # Profile caching and capabilities
+        self._cached_profile: UcpDiscoveryProfile | None = None
+        self._agent_capabilities = agent_capabilities or []
 
         if verbose:
             logging.getLogger(__name__).setLevel(logging.DEBUG)
@@ -105,8 +128,82 @@ class UCPClient:
         }
         return headers
 
-    async def discover(self) -> UcpDiscoveryProfile:
-        """Discover merchant UCP profile."""
+    def clear_profile_cache(self) -> None:
+        """Clear the cached merchant profile."""
+        self._cached_profile = None
+
+    def _validate_version(self, merchant_profile: UcpDiscoveryProfile) -> None:
+        """Validate version compatibility between agent and merchant.
+
+        Args:
+            merchant_profile: The merchant's UCP profile
+
+        Raises:
+            UCPVersionError: If versions are incompatible
+        """
+        merchant_version_str = merchant_profile.ucp.version
+
+        try:
+            merchant_version = datetime.strptime(merchant_version_str, "%Y-%m-%d").date()
+            agent_version = datetime.strptime(UCP_VERSION, "%Y-%m-%d").date()
+        except ValueError as e:
+            logger.warning(f"Could not parse UCP version: {e}")
+            return
+
+        # Agent should not request features from a newer version than merchant supports
+        if agent_version > merchant_version:
+            raise UCPVersionError(UCP_VERSION, merchant_version_str)
+
+    def _get_common_capabilities(
+        self, merchant_profile: UcpDiscoveryProfile
+    ) -> list[UcpCapability]:
+        """Find common capabilities between agent and merchant.
+
+        Args:
+            merchant_profile: The merchant's UCP profile
+
+        Returns:
+            List of capabilities supported by both agent and merchant
+        """
+        # Build set of agent capabilities for fast lookup
+        agent_capability_set = {
+            (cap.get("name"), cap.get("version"))
+            for cap in self._agent_capabilities
+        }
+
+        # Filter merchant capabilities to only those agent supports
+        merchant_capabilities = merchant_profile.ucp.capabilities or []
+        common = [
+            cap
+            for cap in merchant_capabilities
+            if (cap.name, cap.version.root if hasattr(cap.version, 'root') else cap.version)
+            in agent_capability_set
+        ]
+
+        return common
+
+    async def discover(
+        self,
+        use_cache: bool = True,
+        validate_version: bool = True,
+    ) -> UcpDiscoveryProfile:
+        """Discover merchant UCP profile.
+
+        Args:
+            use_cache: Use cached profile if available
+            validate_version: Validate version compatibility
+
+        Returns:
+            The merchant's UCP discovery profile
+
+        Raises:
+            UCPVersionError: If version validation fails
+        """
+        # Check cache first
+        if use_cache and self._cached_profile:
+            self._log("Using cached profile")
+            return self._cached_profile
+
         url = f"{self.config.merchant_url}/.well-known/ucp"
         self._log(f"GET {url}")
 
@@ -115,7 +212,39 @@ class UCPClient:
 
         data = response.json()
         self._log("Discovery response", data)
-        return UcpDiscoveryProfile.model_validate(data)
+        profile = UcpDiscoveryProfile.model_validate(data)
+
+        # Validate version compatibility
+        if validate_version:
+            self._validate_version(profile)
+
+        # Cache the profile
+        self._cached_profile = profile
+
+        return profile
+
+    async def get_common_capabilities(self) -> list[UcpCapability]:
+        """Get capabilities supported by both agent and merchant.
+
+        Returns:
+            List of common capabilities
+        """
+        profile = await self.discover()
+        return self._get_common_capabilities(profile)
+
+    async def get_negotiated_metadata(self) -> UcpMetadata:
+        """Get UCP metadata with negotiated capabilities.
+
+        Returns:
+            UcpMetadata with common capabilities between agent and merchant
+        """
+        profile = await self.discover()
+        common_capabilities = self._get_common_capabilities(profile)
+
+        return UcpMetadata(
+            version=profile.ucp.version,
+            capabilities=common_capabilities,
+        )
 
     async def create_checkout(
         self,
