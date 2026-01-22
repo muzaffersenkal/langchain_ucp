@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 UCP_VERSION = "2026-01-11"
 
 
+class UCPError(Exception):
+    """Base exception for UCP errors."""
+
+    def __init__(self, message: str, status_code: int | None = None, details: Any = None):
+        self.message = message
+        self.status_code = status_code
+        self.details = details
+        super().__init__(message)
+
+
 class UCPVersionError(Exception):
     """Raised when UCP version is incompatible."""
 
@@ -33,6 +43,73 @@ class UCPVersionError(Exception):
             f"UCP version {client_version} is not supported. "
             f"Merchant implements version {merchant_version}."
         )
+
+
+class UCPValidationError(UCPError):
+    """Raised when server returns a validation error."""
+
+    def __init__(self, message: str, field_errors: list[dict[str, Any]] | None = None):
+        self.field_errors = field_errors or []
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        if self.field_errors:
+            errors = "; ".join(
+                f"{e.get('field', 'unknown')}: {e.get('message', 'invalid')}"
+                for e in self.field_errors
+            )
+            return f"Validation error: {errors}"
+        return self.message
+
+
+class UCPNotFoundError(UCPError):
+    """Raised when a resource is not found."""
+    pass
+
+
+class UCPRequestError(UCPError):
+    """Raised when request fails."""
+    pass
+
+
+def _parse_error_response(response: httpx.Response) -> UCPError:
+    """Parse error response from server and return appropriate exception."""
+    status_code = response.status_code
+    
+    try:
+        error_data = response.json()
+    except Exception:
+        error_data = {"message": response.text or "Unknown error"}
+
+    # Extract error message
+    message = error_data.get("message") or error_data.get("detail") or str(error_data)
+    
+    # Handle validation errors (422)
+    if status_code == 422:
+        # Pydantic validation errors
+        if "detail" in error_data and isinstance(error_data["detail"], list):
+            field_errors = []
+            for err in error_data["detail"]:
+                loc = err.get("loc", [])
+                field = ".".join(str(l) for l in loc) if loc else "unknown"
+                msg = err.get("msg", "invalid")
+                field_errors.append({"field": field, "message": msg})
+            return UCPValidationError(
+                f"Invalid request: {len(field_errors)} field(s) have errors",
+                field_errors=field_errors
+            )
+        return UCPValidationError(message)
+    
+    # Handle not found (404)
+    if status_code == 404:
+        return UCPNotFoundError(message, status_code=status_code)
+    
+    # Handle bad request (400)
+    if status_code == 400:
+        return UCPRequestError(f"Bad request: {message}", status_code=status_code)
+    
+    # Handle other errors
+    return UCPError(message, status_code=status_code, details=error_data)
 
 
 class UCPClientConfig(BaseModel):
@@ -208,9 +285,8 @@ class UCPClient:
         self._log(f"GET {url}")
 
         response = await self.http_client.get(url)
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Discovery response", data)
         profile = UcpDiscoveryProfile.model_validate(data)
 
@@ -246,6 +322,15 @@ class UCPClient:
             capabilities=common_capabilities,
         )
 
+    def _handle_response(self, response: httpx.Response) -> dict[str, Any]:
+        """Handle HTTP response and raise appropriate errors."""
+        if response.is_success:
+            return response.json()
+        
+        error = _parse_error_response(response)
+        self._log(f"Error: {error}")
+        raise error
+
     async def create_checkout(
         self,
         request: CheckoutCreateRequest,
@@ -260,9 +345,8 @@ class UCPClient:
         self._log("Request payload", payload)
 
         response = await self.http_client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return CheckoutResponse.model_validate(data)
 
@@ -272,9 +356,8 @@ class UCPClient:
         self._log(f"GET {url}")
 
         response = await self.http_client.get(url, headers=self._get_headers())
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return CheckoutResponse.model_validate(data)
 
@@ -293,9 +376,8 @@ class UCPClient:
         self._log("Request payload", payload)
 
         response = await self.http_client.put(url, json=payload, headers=headers)
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return CheckoutResponse.model_validate(data)
 
@@ -309,7 +391,7 @@ class UCPClient:
         """Complete a checkout session with payment."""
         url = f"{self.config.merchant_url}/checkout-sessions/{checkout_id}/complete"
         payload = {
-            "payment": payment_data,
+            "payment_data": payment_data,
             "risk_signals": risk_signals or {},
         }
         headers = self._get_headers(idempotency_key)
@@ -318,9 +400,8 @@ class UCPClient:
         self._log("Request payload", payload)
 
         response = await self.http_client.post(url, json=payload, headers=headers)
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return CheckoutResponse.model_validate(data)
 
@@ -334,9 +415,8 @@ class UCPClient:
         self._log(f"POST {url}")
 
         response = await self.http_client.post(url, headers=self._get_headers(idempotency_key))
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return CheckoutResponse.model_validate(data)
 
@@ -346,8 +426,7 @@ class UCPClient:
         self._log(f"GET {url}")
 
         response = await self.http_client.get(url, headers=self._get_headers())
-        response.raise_for_status()
-
-        data = response.json()
+        data = self._handle_response(response)
+        
         self._log("Response", data)
         return data

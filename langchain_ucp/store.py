@@ -351,6 +351,11 @@ class UCPStore:
     ) -> CheckoutResponse:
         """Update customer details and delivery address.
 
+        This method handles the full fulfillment flow:
+        1. Add shipping address → server creates destinations
+        2. Select destination → server generates shipping options
+        3. Select first available shipping option → checkout becomes ready
+
         Args:
             first_name: First name
             last_name: Last name
@@ -373,7 +378,7 @@ class UCPStore:
 
         existing = await self.client.get_checkout(self.checkout_id)
 
-        # Build line items
+        # Build line items (needed for all update requests)
         line_items = [
             LineItemUpdateRequest(
                 id=item.id,
@@ -383,16 +388,20 @@ class UCPStore:
             for item in (existing.line_items or [])
         ]
 
-        line_item_ids = [item.id for item in (existing.line_items or [])]
+        # Build buyer info
+        buyer = None
+        if email:
+            buyer = Buyer(email=email, first_name=first_name, last_name=last_name)
 
-        # Build fulfillment with shipping address
+        # STEP 1: Add shipping address with destination
+        dest_id = f"dest_{uuid4().hex[:8]}"
         fulfillment = {
             "methods": [
                 {
                     "type": "shipping",
-                    "line_item_ids": line_item_ids,
                     "destinations": [
                         {
+                            "id": dest_id,
                             "street_address": street_address,
                             "address_locality": address_locality,
                             "address_region": address_region,
@@ -411,11 +420,6 @@ class UCPStore:
             ]
         }
 
-        # Build buyer info
-        buyer = None
-        if email:
-            buyer = Buyer(email=email, first_name=first_name, last_name=last_name)
-
         update_req = CheckoutUpdateRequest(
             id=self.checkout_id,
             currency=existing.currency,
@@ -426,6 +430,93 @@ class UCPStore:
         )
 
         checkout = await self.client.update_checkout(self.checkout_id, update_req)
+        self._log(f"Step 1: Added shipping address, status={checkout.status}")
+
+        # Convert to dict for easier access
+        checkout_dict = checkout.model_dump(mode="json")
+        self._log(f"Fulfillment data: {checkout_dict.get('fulfillment')}")
+
+        # STEP 2: Select destination to trigger option generation
+        fulfillment_dict = checkout_dict.get("fulfillment", {})
+        methods = fulfillment_dict.get("methods", [])
+        
+        if methods:
+            method = methods[0]
+            destinations = method.get("destinations", [])
+            
+            if destinations:
+                dest_id = destinations[0].get("id")
+                self._log(f"Step 2: Selecting destination {dest_id}")
+
+                fulfillment = {
+                    "methods": [
+                        {
+                            "type": "shipping",
+                            "selected_destination_id": dest_id,
+                        }
+                    ]
+                }
+
+                update_req = CheckoutUpdateRequest(
+                    id=self.checkout_id,
+                    currency=checkout.currency,
+                    line_items=line_items,
+                    payment=PaymentUpdateRequest(instruments=[]),
+                    buyer=buyer,
+                    fulfillment=fulfillment,
+                )
+
+                checkout = await self.client.update_checkout(self.checkout_id, update_req)
+                self._log(f"Step 2: Selected destination, status={checkout.status}")
+
+                # Convert to dict again for step 3
+                checkout_dict = checkout.model_dump(mode="json")
+                fulfillment_dict = checkout_dict.get("fulfillment", {})
+                methods = fulfillment_dict.get("methods", [])
+
+                # STEP 3: Select first shipping option
+                if methods:
+                    method = methods[0]
+                    groups = method.get("groups", [])
+                    
+                    if groups:
+                        group = groups[0]
+                        options = group.get("options", [])
+                        
+                        if options:
+                            option_id = options[0].get("id")
+                            self._log(f"Step 3: Selecting option {option_id}")
+
+                            fulfillment = {
+                                "methods": [
+                                    {
+                                        "type": "shipping",
+                                        "selected_destination_id": dest_id,
+                                        "groups": [{"selected_option_id": option_id}],
+                                    }
+                                ]
+                            }
+
+                            update_req = CheckoutUpdateRequest(
+                                id=self.checkout_id,
+                                currency=checkout.currency,
+                                line_items=line_items,
+                                payment=PaymentUpdateRequest(instruments=[]),
+                                buyer=buyer,
+                                fulfillment=fulfillment,
+                            )
+
+                            checkout = await self.client.update_checkout(
+                                self.checkout_id, update_req
+                            )
+                            self._log(f"Step 3: Selected option, status={checkout.status}")
+                        else:
+                            self._log("Step 3: No shipping options available")
+                    else:
+                        self._log("Step 3: No groups available")
+            else:
+                self._log("Step 2: No destinations found")
+
         self._checkout_cache = checkout
         return checkout
 
@@ -485,10 +576,18 @@ class UCPStore:
             )
 
         instrument_id = f"inst_{uuid4().hex[:8]}"
+        # Payment instrument format expected by UCP server
         payment_data = {
             "id": instrument_id,
             "handler_id": payment_handler_id,
-            "credential": {"token": payment_token},
+            "handler_name": payment_handler_id,
+            "type": "card",
+            "brand": "Visa",
+            "last_digits": "4242",
+            "credential": {
+                "type": "token",
+                "token": payment_token,
+            },
         }
 
         completed = await self.client.complete_checkout(

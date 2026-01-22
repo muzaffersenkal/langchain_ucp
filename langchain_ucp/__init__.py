@@ -15,7 +15,14 @@ Example:
 """
 
 from langchain_ucp.toolkit import UCPToolkit
-from langchain_ucp.client import UCPClient
+from langchain_ucp.client import (
+    UCPClient,
+    UCPError,
+    UCPValidationError,
+    UCPNotFoundError,
+    UCPRequestError,
+    UCPVersionError,
+)
 from langchain_ucp.store import UCPStore, Product
 from langchain_ucp.tools import (
     SearchCatalogTool,
@@ -39,6 +46,12 @@ __all__ = [
     "UCPClient",
     "UCPStore",
     "Product",
+    # Errors
+    "UCPError",
+    "UCPValidationError",
+    "UCPNotFoundError",
+    "UCPRequestError",
+    "UCPVersionError",
     # Individual tools
     "SearchCatalogTool",
     "AddToCheckoutTool",
