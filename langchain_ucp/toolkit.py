@@ -1,6 +1,7 @@
 """UCP Toolkit for LangChain agents."""
 
 import logging
+from typing import Any
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +27,16 @@ logger = logging.getLogger(__name__)
 class UCPToolkit(BaseModel):
     """Toolkit for UCP (Universal Commerce Protocol) operations.
 
+    This toolkit provides tools for:
+    - Searching product catalogs
+    - Managing checkout sessions (add/remove/update items)
+    - Updating customer details and shipping info
+    - Completing purchases and tracking orders
+
+    For A2UI (rich UI) support, use the separate a2ui module functions
+    to build system prompts and parse responses. A2UI is an output format
+    standardization, not a tool.
+
     Example:
         >>> from langchain_ucp import UCPToolkit, Product
         >>> from langchain_openai import ChatOpenAI
@@ -41,6 +52,16 @@ class UCPToolkit(BaseModel):
         ... )
         >>> llm = ChatOpenAI(model="gpt-4o")
         >>> agent = create_react_agent(llm, toolkit.get_tools())
+
+    With A2UI support (add to system prompt):
+        >>> from langchain_ucp.a2ui import get_a2ui_system_prompt, parse_a2ui_response
+        >>>
+        >>> # Build system prompt with A2UI instructions
+        >>> base_prompt = "You are a helpful shopping assistant..."
+        >>> system_prompt = base_prompt + get_a2ui_system_prompt()
+        >>>
+        >>> # After getting LLM response, parse A2UI
+        >>> text, a2ui_messages = parse_a2ui_response(response)
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -105,7 +126,20 @@ class UCPToolkit(BaseModel):
         return self._store
 
     def get_tools(self) -> list[BaseTool]:
-        """Get all UCP tools."""
+        """Get all UCP tools.
+        
+        Returns commerce operation tools for:
+        - search_shopping_catalog: Search products
+        - add_to_checkout: Add items to cart
+        - remove_from_checkout: Remove items from cart
+        - update_checkout: Update item quantities
+        - get_checkout: View current cart
+        - update_customer_details: Set shipping address
+        - start_payment: Prepare for payment
+        - complete_checkout: Place order
+        - cancel_checkout: Cancel checkout
+        - get_order: Get order status
+        """
         tool_classes = [
             SearchCatalogTool,
             AddToCheckoutTool,

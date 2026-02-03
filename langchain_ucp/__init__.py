@@ -12,6 +12,17 @@ Example:
     >>> toolkit = UCPToolkit(merchant_url="http://localhost:8000", products=products)
     >>> llm = ChatOpenAI(model="gpt-4o")
     >>> agent = create_react_agent(llm, toolkit.get_tools())
+
+With A2UI (Agent-to-User Interface) support:
+    >>> from langchain_ucp import UCPToolkit, Product
+    >>> from langchain_ucp.a2ui import create_product_card
+    >>>
+    >>> toolkit = UCPToolkit(
+    ...     merchant_url="http://localhost:8000",
+    ...     products=products,
+    ...     a2ui_enabled=True,  # Enable rich UI rendering
+    ... )
+    >>> # Agent can now use send_a2ui_to_client tool to render rich UIs
 """
 
 from langchain_ucp.client import UCPClient
@@ -37,7 +48,7 @@ from langchain_ucp.tools import (
     UpdateCustomerDetailsTool,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # Main toolkit
