@@ -2,6 +2,14 @@
 
 LangChain toolkit for Universal Commerce Protocol (UCP) with A2UI support.
 
+### Basic Agent Demo
+
+https://private-user-images.githubusercontent.com/22756941/545214874-602f31b8-2623-49b1-9217-2c67f8d43ae0.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzAyMzYzNDgsIm5iZiI6MTc3MDIzNjA0OCwicGF0aCI6Ii8yMjc1Njk0MS81NDUyMTQ4NzQtNjAyZjMxYjgtMjYyMy00OWIxLTkyMTctMmM2N2Y4ZDQzYWUwLm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMDQlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjA0VDIwMTQwOFomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWQ3ODIyYzRlMjUxYjZkYzEwMTc0OGE1ZmNiNjI5ZDVkNDA2NjI0YmUxZTY3ZTVmMzM4NWZhNDQzMjcxZGJlODkmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.QYh7hqofZ4tFj_OLTRoum404Q5B2WVNa2sgDqE3M930
+
+
+
+
+
 ## Overview
 
 `langchain-ucp` provides LangChain tools and toolkit for building AI agents that can interact with [UCP](https://ucp.dev)-compliant merchants. It includes **A2UI (Agent-to-User Interface)** support for rendering rich, interactive UIs.
@@ -100,6 +108,10 @@ text_content, a2ui_messages = parse_a2ui_response(response.content)
 ```
 
 ## A2UI Architecture
+
+### UCP with A2UI - Rich UI Shopping Experience
+
+https://private-user-images.githubusercontent.com/22756941/545214895-340c8e12-9af1-4a01-a815-8c490fa03894.mp4?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzAyMzY2MTksIm5iZiI6MTc3MDIzNjMxOSwicGF0aCI6Ii8yMjc1Njk0MS81NDUyMTQ4OTUtMzQwYzhlMTItOWFmMS00YTAxLWE4MTUtOGM0OTBmYTAzODk0Lm1wND9YLUFtei1BbGdvcml0aG09QVdTNC1ITUFDLVNIQTI1NiZYLUFtei1DcmVkZW50aWFsPUFLSUFWQ09EWUxTQTUzUFFLNFpBJTJGMjAyNjAyMDQlMkZ1cy1lYXN0LTElMkZzMyUyRmF3czRfcmVxdWVzdCZYLUFtei1EYXRlPTIwMjYwMjA0VDIwMTgzOVomWC1BbXotRXhwaXJlcz0zMDAmWC1BbXotU2lnbmF0dXJlPWRiZGU0MmIxZWY4NDYzZTUzOGY1ZDJhNDVkMjlkZTZiZjY0M2RhYTg3OWUxNWQ1YzdhYTk4OTlmZjkwYmM1ZTQmWC1BbXotU2lnbmVkSGVhZGVycz1ob3N0In0.yDO7o5nd42NsuU3joV3LPbg1yxlzqxpymylYbKQLKJg
 
 A2UI works through a delimiter-based approach:
 
@@ -241,6 +253,9 @@ See the [examples](./examples) directory:
 - `basic_agent.py` - Simple agent that adds items to cart
 - `interactive_chat.py` - Interactive chat with the shopping agent
 - `a2ui_agent.py` - Agent with A2UI rich UI rendering
+
+
+
 
 ## License
 
